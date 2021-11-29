@@ -1,71 +1,79 @@
 package com.microsoft.identity.client.msal.automationapp.testpass.claims;
 
+import com.microsoft.identity.client.AcquireTokenParameters;
 import com.microsoft.identity.client.Prompt;
 import com.microsoft.identity.client.claims.ClaimsRequest;
 import com.microsoft.identity.client.claims.RequestedClaimAdditionalInformation;
-import com.microsoft.identity.client.msal.automationapp.AbstractMsalUiTest;
 import com.microsoft.identity.client.msal.automationapp.R;
-import com.microsoft.identity.client.msal.automationapp.sdk.MsalAuthResult;
-import com.microsoft.identity.client.msal.automationapp.sdk.MsalAuthTestParams;
-import com.microsoft.identity.client.msal.automationapp.sdk.MsalSdk;
-import com.microsoft.identity.client.ui.automation.TokenRequestTimeout;
+import com.microsoft.identity.client.msal.automationapp.interaction.InteractiveRequest;
+import com.microsoft.identity.client.msal.automationapp.interaction.OnInteractionRequired;
+import com.microsoft.identity.client.msal.automationapp.testpass.broker.AbstractMsalBrokerTest;
+import com.microsoft.identity.client.ui.automation.TokenRequestLatch;
+import com.microsoft.identity.client.ui.automation.interaction.PromptHandlerParameters;
 import com.microsoft.identity.client.ui.automation.interaction.PromptParameter;
 import com.microsoft.identity.client.ui.automation.interaction.microsoftsts.AadPromptHandler;
-import com.microsoft.identity.client.ui.automation.interaction.microsoftsts.MicrosoftStsPromptHandlerParameters;
 import com.microsoft.identity.internal.testutils.labutils.LabConfig;
 import com.microsoft.identity.internal.testutils.labutils.LabConstants;
 import com.microsoft.identity.internal.testutils.labutils.LabUserQuery;
 
 import org.junit.Test;
 
-import java.util.Arrays;
-
-public class ClaimsRequestTest extends AbstractMsalUiTest {
+public class ClaimsRequestTest extends AbstractMsalBrokerTest {
 
     @Test
     public void testAcquireTokenSilentlyWithClaims() throws Throwable {
         ClaimsRequest claimsRequest = new ClaimsRequest();
         RequestedClaimAdditionalInformation additionalInformation = new RequestedClaimAdditionalInformation();
         additionalInformation.setEssential(true);
-        additionalInformation.setValue("650d9495-66a1-4f6b-bcd7-4f0add50c81a");
-        claimsRequest.requestClaimInAccessToken("device_id", additionalInformation);
+        claimsRequest.requestClaimInAccessToken("deviceid", additionalInformation);
 
         final String username = mLoginHint;
         final String password = LabConfig.getCurrentLabConfig().getLabUserPassword();
 
-        final MsalSdk msalSdk = new MsalSdk();
-        final MsalAuthTestParams authTestParams = MsalAuthTestParams.builder()
-                .loginHint(mLoginHint)
-                .activity(mActivity)
-                .scopes(Arrays.asList(mScopes))
-                .promptParameter(Prompt.SELECT_ACCOUNT)
-                .msalConfigResourceId(getConfigFileResourceId())
-                .claims(claimsRequest)
+        final TokenRequestLatch latch = new TokenRequestLatch(1);
+
+        final AcquireTokenParameters parameters = new AcquireTokenParameters.Builder()
+                .startAuthorizationFromActivity(mActivity)
+                .withLoginHint(mLoginHint)
+                .withCallback(successfulInteractiveCallback(latch))
+                .withPrompt(Prompt.SELECT_ACCOUNT)
+                .withResource(mScopes[0])
+                .withClaims(claimsRequest)
                 .build();
 
-        final MsalAuthResult authResult = msalSdk.acquireTokenInteractive(authTestParams, new com.microsoft.identity.client.ui.automation.interaction.OnInteractionRequired() {
-            @Override
-            public void handleUserInteraction() {
-                final MicrosoftStsPromptHandlerParameters promptHandlerParameters = MicrosoftStsPromptHandlerParameters.builder()
-                        .prompt(PromptParameter.SELECT_ACCOUNT)
-                        .loginHint(mLoginHint)
-                        .sessionExpected(false)
-                        .consentPageExpected(false)
-                        .speedBumpExpected(false)
-                        .build();
+        final InteractiveRequest interactiveRequest = new InteractiveRequest(
+                mApplication,
+                parameters,
+                new OnInteractionRequired() {
+                    @Override
+                    public void handleUserInteraction() {
+                        final PromptHandlerParameters promptHandlerParameters = PromptHandlerParameters.builder()
+                                .prompt(PromptParameter.SELECT_ACCOUNT)
+                                .loginHint(mLoginHint)
+                                .sessionExpected(false)
+                                .consentPageExpected(false)
+                                .speedBumpExpected(false)
+                                .broker(mBroker)
+                                .expectingBrokerAccountChooserActivity(false)
+                                .registerPageExpected(true)
+                                .build();
 
-                new AadPromptHandler(promptHandlerParameters)
-                        .handlePrompt(username, password);
-            }
-        }, TokenRequestTimeout.MEDIUM);
+                        new AadPromptHandler(promptHandlerParameters)
+                                .handlePrompt(username, password);
+                    }
+                }
+        );
 
-        authResult.assertSuccess();
+        interactiveRequest.execute();
+        latch.await();
+        mAccount.getClaims();
     }
 
     @Override
     public LabUserQuery getLabUserQuery() {
         final LabUserQuery query = new LabUserQuery();
         query.azureEnvironment = LabConstants.AzureEnvironment.AZURE_CLOUD;
+        query.protectionPolicy = LabConstants.ProtectionPolicy.MAM_CA;
         return query;
     }
 
@@ -76,7 +84,7 @@ public class ClaimsRequestTest extends AbstractMsalUiTest {
 
     @Override
     public String[] getScopes() {
-        return new String[]{"User.read"};
+        return new String[]{"00000003-0000-0ff1-ce00-000000000000"};
     }
 
     @Override
@@ -86,6 +94,6 @@ public class ClaimsRequestTest extends AbstractMsalUiTest {
 
     @Override
     public int getConfigFileResourceId() {
-        return R.raw.msal_config_webview;
+        return R.raw.msal_config_default;
     }
 }
